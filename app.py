@@ -3,9 +3,10 @@
 止跌企稳信号追踪器 - Web版
 本地启动后浏览器访问 http://localhost:8080
 """
-import json, datetime, os, sys, math, threading, webbrowser
+import json, datetime, os, sys, math, threading, webbrowser, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -18,6 +19,11 @@ import requests as http_requests
 # ============================================================
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 SIGNAL_THRESHOLD = 3
+CACHE_TTL = 300  # 缓存5分钟
+
+# 分析结果缓存 {code: {"result": ..., "ts": timestamp}}
+_cache = {}
+_cache_lock = threading.Lock()
 
 DEFAULT_STOCKS = {
     "300916": {"name": "朗特智能", "secid": "0.300916", "exchange": "SZ", "support": 0, "cost_hint": None, "group": "默认"},
@@ -122,7 +128,7 @@ def fetch_kline_a(secid, days=150):
     url = f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={symbol}&scale=240&ma=5&datalen={days}"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        resp = http_requests.get(url, headers=headers, timeout=15)
+        resp = http_requests.get(url, headers=headers, timeout=8)
         return [{"date": d["day"], "open": float(d["open"]), "close": float(d["close"]),
                  "high": float(d["high"]), "low": float(d["low"]), "volume": int(d["volume"])} for d in resp.json()]
     except Exception as e:
@@ -133,7 +139,7 @@ def fetch_kline_hk(code, days=150):
     url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=hk{code},day,,,{days},qfq"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        resp = http_requests.get(url, headers=headers, timeout=15)
+        resp = http_requests.get(url, headers=headers, timeout=8)
         data = resp.json()
         stock_data = data.get("data", {}).get(f"hk{code}", {})
         klines = stock_data.get("qfqday", stock_data.get("day", []))
@@ -151,6 +157,20 @@ def fetch_kline(secid, days=150):
 # ============================================================
 # 分析逻辑
 # ============================================================
+def analyze_stock_cached(code, config):
+    """带缓存的分析，5分钟内返回缓存结果"""
+    now = time.time()
+    with _cache_lock:
+        entry = _cache.get(code)
+        if entry and now - entry["ts"] < CACHE_TTL:
+            return entry["result"]
+    result = analyze_stock(code, config)
+    if result:
+        result["group"] = config.get("group", "默认")
+    with _cache_lock:
+        _cache[code] = {"result": result, "ts": now}
+    return result
+
 def analyze_stock(code, config):
     name = config["name"]
     secid = config["secid"]
@@ -663,6 +683,7 @@ class Handler(BaseHTTPRequestHandler):
             stocks[code] = {"name": name, "secid": secid, "exchange": exchange,
                            "support": 0, "cost_hint": float(cost) if cost else None, "group": group}
             save_config(stocks)
+            _cache.clear()
             self._json({"ok": True, "name": name})
 
         elif path == '/api/remove':
@@ -671,6 +692,7 @@ class Handler(BaseHTTPRequestHandler):
             if code in stocks:
                 del stocks[code]
                 save_config(stocks)
+                _cache.clear()
             self._json({"ok": True})
 
         elif path == '/api/move':
@@ -680,6 +702,7 @@ class Handler(BaseHTTPRequestHandler):
             if code in stocks:
                 stocks[code]["group"] = group
                 save_config(stocks)
+                _cache.clear()
             self._json({"ok": True})
 
         elif path == '/api/rename_group':
@@ -700,24 +723,25 @@ class Handler(BaseHTTPRequestHandler):
             code = params.get('code', [''])[0]
             stocks = load_config()
             if code in stocks:
-                r = analyze_stock(code, stocks[code])
-                r["group"] = stocks[code].get("group", "默认")
+                r = analyze_stock_cached(code, stocks[code])
                 self._json(r if r else {"error": f"无法获取 {code} 数据"})
             else:
                 self._json({"error": f"股票 {code} 不在自选列表中"})
 
         elif path == '/api/analyze_all':
             stocks = load_config()
-            results = []
-            for code, cfg in stocks.items():
-                try:
-                    r = analyze_stock(code, cfg)
-                    if r:
-                        r["group"] = cfg.get("group", "默认")
-                    results.append(r)
-                except Exception as e:
-                    print(f"  [错误] {code}: {e}")
-                    results.append(None)
+            results_map = {}
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = {pool.submit(analyze_stock_cached, code, cfg): code for code, cfg in stocks.items()}
+                for future in as_completed(futures):
+                    code = futures[future]
+                    try:
+                        results_map[code] = future.result()
+                    except Exception as e:
+                        print(f"  [错误] {code}: {e}")
+                        results_map[code] = None
+            # 保持配置中的顺序
+            results = [results_map.get(code) for code in stocks]
             self._json(results)
 
         else:
