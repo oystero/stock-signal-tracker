@@ -1,0 +1,68 @@
+{
+  "stocks": {
+    "300916": {
+      "name": "朗特智能",
+      "secid": "0.300916",
+      "exchange": "SZ",
+      "support": 25.0,
+      "cost_hint": null,
+      "group": "默认"
+    },
+    "300413": {
+      "name": "芒果超媒",
+      "secid": "0.300413",
+      "exchange": "SZ",
+      "support": 15.0,
+      "cost_hint": null,
+      "group": "默认"
+    },
+    "00700": {
+      "name": "腾讯控股",
+      "secid": "116.00700",
+      "exchange": "HK",
+      "support": 400.0,
+      "cost_hint": null,
+      "group": "默认"
+    },
+    "601888": {
+      "name": "中国中免",
+      "secid": "1.601888",
+      "exchange": "SH",
+      "support": 55.0,
+      "cost_hint": null,
+      "group": "默认"
+    },
+    "002129": {
+      "name": "TCL中环",
+      "secid": "0.002129",
+      "exchange": "SZ",
+      "support": 8.0,
+      "cost_hint": null,
+      "group": "默认"
+    },
+    "000062": {
+      "name": "深圳华强",
+      "secid": "0.000062",
+      "exchange": "SZ",
+      "support": 25.0,
+      "cost_hint": null,
+      "group": "默认"
+    },
+    "301286": {
+      "name": "侨源股份",
+      "secid": "0.301286",
+      "exchange": "SZ",
+      "support": 0,
+      "cost_hint": null,
+      "group": "默认"
+    },
+    "09988": {
+      "name": "阿里巴巴-W",
+      "secid": "116.09988",
+      "exchange": "HK",
+      "support": 0,
+      "cost_hint": null,
+      "group": "默认"
+    }
+  }
+}
