@@ -586,19 +586,23 @@ h1{text-align:center;font-size:1.5em;font-weight:700;padding:20px 0 4px;letter-s
   </details>
 </div>
 <script>
-let stocks={};let allResults=[];let currentGroup='全部';
+const STORAGE_KEY='stock_tracker_stocks';
+const DEFAULT_STOCKS={"300916":{name:"朗特智能",secid:"0.300916",exchange:"SZ",group:"默认"},"300413":{name:"芒果超媒",secid:"0.300413",exchange:"SZ",group:"默认"},"00700":{name:"腾讯控股",secid:"116.00700",exchange:"HK",group:"默认"},"601888":{name:"中国中免",secid:"1.601888",exchange:"SH",group:"默认"},"002129":{name:"TCL中环",secid:"0.002129",exchange:"SZ",group:"默认"},"000062":{name:"深圳华强",secid:"0.000062",exchange:"SZ",group:"默认"},"301286":{name:"侨源股份",secid:"0.301286",exchange:"SZ",group:"默认"}};
+let stocks={},allResults=[],currentGroup='全部';
 const SIGNAL_THRESH=3;
-async function api(p,q){return(await fetch('/api/'+p+'?'+new URLSearchParams(q))).json()}
+
+function detectExchange(c){if(c.length===5&&/^\d+$/.test(c))return{exchange:"HK",secid:"116."+c};if(c.startsWith("6"))return{exchange:"SH",secid:"1."+c};return{exchange:"SZ",secid:"0."+c}}
+function loadStocks(){try{const d=localStorage.getItem(STORAGE_KEY);stocks=d?JSON.parse(d):{...DEFAULT_STOCKS}}catch(e){stocks={...DEFAULT_STOCKS}}if(!Object.keys(stocks).length)stocks={...DEFAULT_STOCKS};renderGroupTabs();renderGroupSelect()}
+function saveStocks(){localStorage.setItem(STORAGE_KEY,JSON.stringify(stocks))}
 function getGroups(){const g={};for(const[c,x]of Object.entries(stocks)){const k=x.group||'默认';if(!g[k])g[k]=[];g[k].push(c)}return g}
-async function loadStocks(){stocks=await api('stocks');renderGroupTabs();renderGroupSelect()}
 function renderGroupTabs(){const g=getGroups(),ns=Object.keys(g),t=Object.keys(stocks).length;let h=`<div class="group-tab${currentGroup==='全部'?' active':''}" onclick="switchGroup('全部')">全部<span class="count">${t}</span></div>`;for(const n of ns)h+=`<div class="group-tab${currentGroup===n?' active':''}" onclick="switchGroup('${n}')">${n}<span class="count">${g[n].length}</span></div>`;document.getElementById('groupTabs').innerHTML=h}
 function renderGroupSelect(){const g=getGroups(),s=document.getElementById('groupSelect');s.innerHTML=Object.keys(g).map(x=>`<option value="${x}">${x}</option>`).join('')}
 function switchGroup(n){currentGroup=n;renderGroupTabs();renderResults()}
-async function addGroup(){const n=document.getElementById('newGroupInput').value.trim();if(!n)return;const s=document.getElementById('groupSelect');if(![...s.options].some(o=>o.value===n)){const o=document.createElement('option');o.value=n;o.text=n;s.add(o)}document.getElementById('newGroupInput').value='';renderGroupTabs()}
-async function addStock(){const c=document.getElementById('codeInput').value.trim(),n=document.getElementById('nameInput').value.trim(),$=document.getElementById('costInput').value.trim(),g=document.getElementById('groupSelect').value||'默认';if(!c||!n){alert('请填写股票代码和名称');return}await api('add',{code:c,name:n,cost:$,group:g});document.getElementById('codeInput').value='';document.getElementById('nameInput').value='';document.getElementById('costInput').value='';await loadStocks();runAnalysis()}
-async function removeStock(c){if(!confirm(`确认删除 ${stocks[c]?.name||c}？`))return;await api('remove',{code:c});await loadStocks();runAnalysis()}
-async function moveStock(c,g){await api('move',{code:c,group:g});await loadStocks();runAnalysis()}
-async function runAnalysis(){const el=document.getElementById('content');el.innerHTML='<div class="loading"><div class="spinner"></div><br>正在分析全部自选股...</div>';allResults=await api('analyze_all');renderResults()}
+function addGroup(){const n=document.getElementById('newGroupInput').value.trim();if(!n)return;const s=document.getElementById('groupSelect');if(![...s.options].some(o=>o.value===n)){const o=document.createElement('option');o.value=n;o.text=n;s.add(o)}document.getElementById('newGroupInput').value='';renderGroupTabs()}
+function addStock(){const code=document.getElementById('codeInput').value.trim(),name=document.getElementById('nameInput').value.trim(),cost=document.getElementById('costInput').value.trim(),group=document.getElementById('groupSelect').value||'默认';if(!code||!name){alert('请填写股票代码和名称');return}const ex=detectExchange(code);stocks[code]={name,...ex,group,cost_hint:cost?parseFloat(cost):null};saveStocks();document.getElementById('codeInput').value='';document.getElementById('nameInput').value='';document.getElementById('costInput').value='';renderGroupTabs();renderGroupSelect();const el=document.getElementById('content');el.innerHTML=`<div class="loading"><div class="spinner"></div><br>已添加 ${name}，正在分析...</div>`;runAnalysis()}
+function removeStock(c){if(!confirm(`确认删除 ${stocks[c]?.name||c}？`))return;delete stocks[c];saveStocks();renderGroupTabs();renderGroupSelect();runAnalysis()}
+function moveStock(c,g){if(stocks[c]){stocks[c].group=g;saveStocks();renderGroupTabs();renderGroupSelect();runAnalysis()}}
+async function runAnalysis(){const el=document.getElementById('content');el.innerHTML='<div class="loading"><div class="spinner"></div><br>正在分析...</div>';try{const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),30000);const resp=await fetch('/api/analyze_all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stocks}),signal:ctrl.signal});clearTimeout(t);allResults=await resp.json();renderResults()}catch(e){el.innerHTML='<div class="loading" style="color:var(--red)">分析请求失败，请稍后刷新重试</div>'}}
 function renderResults(){const el=document.getElementById('content');let rs=allResults.filter(Boolean);if(currentGroup!=='全部')rs=rs.filter(r=>r.group===currentGroup);rs.sort((a,b)=>b.composite_score-a.composite_score);let h='<div class="cards">';rs.forEach(r=>{h+=renderCard(r)});h+='</div>'+renderSummary(rs);el.innerHTML=h}
 function scColor(s){return s>=70?'var(--green)':s>=55?'var(--accent)':s>=40?'var(--orange)':'var(--red)'}
 function scLabel(s){return s>=70?'强烈关注':s>=55?'接近信号':s>=40?'继续等待':'回避观望'}
@@ -615,7 +619,6 @@ function renderCard(r){
   if(r.atr)m+=`<div class="metric">ATR(14): <span>${r.atr.toFixed(2)}</span></div>`;
   if(r.ma){const ma=r.ma;let st='交织';if(ma['5']&&ma['10']&&ma['20']){if(ma['5']<ma['10']&&ma['10']<ma['20'])st='空头排列';else if(ma['5']>ma['10']&&ma['10']>ma['20'])st='多头排列'}m+=`<div class="metric">均线: <span>${st}</span></div>`}
   m+=`<div class="metric">量比: <span>${r.volume_ratio?.toFixed(2)||'—'}</span></div>`;
-  // 预测
   let pred='';
   if(r.prediction){
     const p=r.prediction;
@@ -639,7 +642,7 @@ function renderSummary(rs){
   let rows=rs.map(r=>{let s='回避';if(r.triggered)s='触发!';else if(r.composite_score>=55)s='接近';else if(r.composite_score>=40)s='等待';return`<tr><td>${r.name}</td><td>${r.group||'默认'}</td><td>${r.price.toFixed(2)}</td><td style="color:${scColor(r.composite_score)};font-weight:600">${r.composite_score.toFixed(0)}</td><td>${r.signal_count}/5</td><td style="color:${scColor(r.composite_score)}">${s}</td></tr>`}).join('');
   return`<div class="card summary-card"><div class="card-title">信号汇总</div><table class="summary-table"><thead><tr><th>股票</th><th>分组</th><th>价格</th><th>评分</th><th>信号</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
-loadStocks().then(()=>runAnalysis());
+loadStocks();runAnalysis();
 </script>
 </body>
 </html>'''
@@ -743,6 +746,40 @@ class Handler(BaseHTTPRequestHandler):
             # 保持配置中的顺序
             results = [results_map.get(code) for code in stocks]
             self._json(results)
+
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        length = int(self.headers.get('Content-Length', 0))
+        body = json.loads(self.rfile.read(length)) if length else {}
+
+        if path == '/api/analyze_all':
+            stocks = body.get("stocks", load_config())
+            results_map = {}
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = {pool.submit(analyze_stock_cached, code, cfg): code for code, cfg in stocks.items()}
+                for future in as_completed(futures):
+                    code = futures[future]
+                    try:
+                        results_map[code] = future.result()
+                    except Exception as e:
+                        print(f"  [错误] {code}: {e}")
+                        results_map[code] = None
+            results = [results_map.get(code) for code in stocks]
+            self._json(results)
+
+        elif path == '/api/analyze':
+            code = body.get("code", "")
+            stocks = body.get("stocks", load_config())
+            if code in stocks:
+                r = analyze_stock_cached(code, stocks[code])
+                self._json(r if r else {"error": f"无法获取 {code} 数据"})
+            else:
+                self._json({"error": f"股票 {code} 不在自选列表中"})
 
         else:
             self.send_response(404)
